@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { pushApiError } from '@/components/ApiErrorPopup';
 
 const api = axios.create({
     baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
@@ -19,7 +20,9 @@ api.interceptors.response.use(
     (response) => response,
     async (error) => {
         const originalRequest = error.config;
-        if (error.response?.status === 401 && !originalRequest._retry) {
+        const status = error.response?.status;
+
+        if (status === 401 && !originalRequest._retry) {
             originalRequest._retry = true;
             try {
                 const refreshToken = localStorage.getItem('refresh_token');
@@ -37,6 +40,13 @@ api.interceptors.response.use(
                 window.location.href = '/login';
             }
         }
+
+        // Push error to global popup (skip 401s since they're handled above)
+        if (status !== 401) {
+            const message = error.response?.data?.detail || error.message || 'حدث خطأ غير متوقع';
+            pushApiError(message, status);
+        }
+
         return Promise.reject(error);
     }
 );

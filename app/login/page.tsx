@@ -40,8 +40,6 @@ export default function LoginPage() {
 
     return (
         <div className="min-h-screen flex">
-            {/* Left Side - WhatsApp Panel */}
-            <WhatsAppPanel />
 
             {/* Right Side - Form */}
             <div className="w-full lg:w-1/2 flex flex-col justify-center px-8 sm:px-16 lg:px-24 py-12" dir="rtl">
@@ -120,6 +118,9 @@ export default function LoginPage() {
                     </p>
                 </div>
             </div>
+
+            {/* Left Side - WhatsApp Panel */}
+            <WhatsAppPanel />
         </div>
     );
 }
