@@ -16,7 +16,7 @@ import {
     SidebarInset,
     SidebarTrigger,
 } from '@/components/ui/sidebar';
-import { Settings, Home, Phone, FileText, LogOut, MessageCircle, Megaphone, PhoneOff } from 'lucide-react';
+import { Settings, Home, Phone, FileText, LogOut, MessageCircle, Megaphone, PhoneOff, MessageSquareReply, MessageSquareText } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import Link from 'next/link';
 import { Separator } from '@/components/ui/separator';
@@ -27,6 +27,8 @@ const navItems = [
     { title: 'القوالب', href: '/templates', icon: FileText },
     { title: 'الحملات', href: '/campaigns', icon: Megaphone },
     { title: 'المكالمات', href: '/calls', icon: PhoneOff },
+    { title: 'الرد التلقائي', href: '/autoreply', icon: MessageSquareReply },
+    { title: 'سجل الرسائل', href: '/messages', icon: MessageSquareText },
     { title: 'الإعدادات', href: '/settings', icon: Settings },
 ];
 

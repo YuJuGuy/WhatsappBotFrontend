@@ -48,7 +48,7 @@ export default function CallsPage() {
             setTemplates(tplData);
 
             // Fetch config
-            const { data: cfgData } = await api.get('/api/calls/config');
+            const { data: cfgData } = await api.get('/api/calls-config/');
             if (cfgData) {
                 setConfig(cfgData);
                 setIsNew(false);
@@ -73,11 +73,11 @@ export default function CallsPage() {
         setMessage(null);
         try {
             if (isNew) {
-                const { data } = await api.post('/api/calls/config', config);
+                const { data } = await api.post('/api/calls-config/', config);
                 setConfig(data);
                 setIsNew(false);
             } else {
-                const { data } = await api.put('/api/calls/config', config);
+                const { data } = await api.put('/api/calls-config/', config);
                 setConfig(data);
             }
             setMessage({ type: 'success', text: 'تم حفظ الإعدادات بنجاح' });
