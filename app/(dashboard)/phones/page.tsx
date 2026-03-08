@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -51,18 +51,16 @@ interface PhoneGroup {
 // ── Status Helpers ───────────────────────────────
 function getStatusConfig(status: string | null) {
     switch (status) {
-        case 'connected':
+        case 'WORKING':
             return { label: 'متصل', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', icon: Wifi };
-        case 'disconnected':
-            return { label: 'غير متصل', color: 'bg-red-500/20 text-red-400 border-red-500/30', icon: WifiOff };
-        case 'scan_qr':
+        case 'STOPPED':
+            return { label: 'غير متصل (معلّق)', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30', icon: Clock };
+        case 'SCAN_QR_CODE':
             return { label: 'مسح QR', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30', icon: QrCode };
-        case 'starting':
+        case 'STARTING':
             return { label: 'يبدأ...', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30', icon: Clock };
-        case 'failed':
+        case 'FAILED':
             return { label: 'فشل', color: 'bg-red-500/20 text-red-400 border-red-500/30', icon: AlertCircle };
-        case 'pending':
-            return { label: 'معلّق', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30', icon: Clock };
         default:
             return { label: status || 'غير معروف', color: 'bg-secondary text-muted-foreground border-border', icon: Clock };
     }
@@ -97,10 +95,15 @@ export default function PhonesPage() {
     const [checkingStatus, setCheckingStatus] = useState<number | null>(null);
     const [checkingAll, setCheckingAll] = useState(false);
 
-    // QR dialog
-    const [qrDialog, setQrDialog] = useState<{ phoneId: number; phoneName: string } | null>(null);
+    // Auth dialog (QR + Code)
+    const [authDialog, setAuthDialog] = useState<{ phoneId: number; phoneName: string } | null>(null);
+    const [authTab, setAuthTab] = useState<'qr' | 'code'>('qr');
     const [qrUrl, setQrUrl] = useState<string | null>(null);
     const [loadingQr, setLoadingQr] = useState(false);
+    const [codePhoneNumber, setCodePhoneNumber] = useState('');
+    const [codeResult, setCodeResult] = useState<string | null>(null);
+    const [requestingCode, setRequestingCode] = useState(false);
+    const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
     // ── Fetch Data ───────────────────────────────
     const fetchPhones = useCallback(async () => {
@@ -129,8 +132,8 @@ export default function PhonesPage() {
             setPhones(prev => prev.map(p =>
                 p.id === phone.id ? { ...p, status: data.status, number: data.number } : p
             ));
-            if (data.status === 'scan_qr' && autoOpenQr) {
-                openQrDialog(phone.id, phone.name);
+            if (data.status === 'SCAN_QR_CODE' && autoOpenQr) {
+                openAuthDialog(phone.id, phone.name);
             }
         } catch (err) {
             console.error('Failed to check status:', err);
@@ -155,8 +158,8 @@ export default function PhonesPage() {
             setPhones(prev => prev.map(p =>
                 p.id === phone.id ? { ...p, status: data.status, number: data.number } : p
             ));
-            if (data.status === 'scan_qr') {
-                openQrDialog(phone.id, phone.name);
+            if (data.status === 'SCAN_QR_CODE') {
+                openAuthDialog(phone.id, phone.name);
             }
         } catch (err) {
             console.error('Failed to restart session:', err);
@@ -165,8 +168,12 @@ export default function PhonesPage() {
         }
     };
 
-    const openQrDialog = async (phoneId: number, phoneName: string) => {
-        setQrDialog({ phoneId, phoneName });
+    // ── Auth Dialog ──────────────────────────────
+    const openAuthDialog = async (phoneId: number, phoneName: string) => {
+        setAuthDialog({ phoneId, phoneName });
+        setAuthTab('qr');
+        setCodePhoneNumber('');
+        setCodeResult(null);
         setLoadingQr(true);
         setQrUrl(null);
         try {
@@ -178,10 +185,64 @@ export default function PhonesPage() {
         } finally {
             setLoadingQr(false);
         }
+        startPolling(phoneId);
     };
 
     const refreshQr = () => {
-        if (qrDialog) openQrDialog(qrDialog.phoneId, qrDialog.phoneName);
+        if (authDialog) {
+            setLoadingQr(true);
+            setQrUrl(null);
+            api.get(`/api/phone/${authDialog.phoneId}/qr`, { responseType: 'blob' })
+                .then(response => setQrUrl(URL.createObjectURL(response.data)))
+                .catch(() => { })
+                .finally(() => setLoadingQr(false));
+        }
+    };
+
+    const requestCode = async () => {
+        if (!authDialog || !codePhoneNumber.trim()) return;
+        setRequestingCode(true);
+        setCodeResult(null);
+        try {
+            const { data } = await api.post(`/api/phone/${authDialog.phoneId}/request-code`, {
+                phone_number: codePhoneNumber.trim(),
+            });
+            setCodeResult(data?.code || 'تم إرسال الكود إلى واتساب');
+        } catch (err: any) {
+            setCodeResult(err?.response?.data?.detail || 'فشل إرسال الكود');
+        } finally {
+            setRequestingCode(false);
+        }
+    };
+
+    const startPolling = (phoneId: number) => {
+        stopPolling();
+        pollingRef.current = setInterval(async () => {
+            try {
+                const { data } = await api.get(`/api/phone/${phoneId}/status`);
+                setPhones(prev => prev.map(p =>
+                    p.id === phoneId ? { ...p, status: data.status, number: data.number } : p
+                ));
+                if (data.status === 'WORKING') {
+                    stopPolling();
+                    setAuthDialog(null);
+                }
+            } catch (err) {
+                console.error('Polling error:', err);
+            }
+        }, 3000);
+    };
+
+    const stopPolling = () => {
+        if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+        }
+    };
+
+    const closeAuthDialog = () => {
+        stopPolling();
+        setAuthDialog(null);
     };
 
     // ── Phone CRUD ───────────────────────────────
@@ -410,18 +471,18 @@ export default function PhonesPage() {
                                                     )}
                                                     فحص الحالة
                                                 </Button>
-                                                {p.status === 'scan_qr' && (
+                                                {p.status === 'SCAN_QR_CODE' && (
                                                     <Button
                                                         variant="outline"
                                                         size="sm"
                                                         className="flex-1 text-xs gap-1.5 border-blue-500/30 text-blue-400 hover:bg-blue-500/10"
-                                                        onClick={() => openQrDialog(p.id, p.name)}
+                                                        onClick={() => openAuthDialog(p.id, p.name)}
                                                     >
                                                         <QrCode className="w-3 h-3" />
                                                         مسح QR
                                                     </Button>
                                                 )}
-                                                {p.status === 'failed' && (
+                                                {p.status === 'FAILED' && (
                                                     <Button
                                                         variant="outline"
                                                         size="sm"
@@ -699,42 +760,107 @@ export default function PhonesPage() {
                 </DialogContent>
             </Dialog>
 
-            {/* QR Code Dialog */}
-            <Dialog open={!!qrDialog} onOpenChange={() => setQrDialog(null)}>
-                <DialogContent className="sm:max-w-md bg-card border-border">
+            {/* Auth Dialog (QR + Code) */}
+            <Dialog open={!!authDialog} onOpenChange={(open) => !open && closeAuthDialog()}>
+                <DialogContent className="sm:max-w-md bg-card border-border" dir="rtl">
                     <DialogHeader>
                         <DialogTitle className="text-white text-center">
-                            مسح رمز QR - {qrDialog?.phoneName}
+                            ربط الرقم - {authDialog?.phoneName}
                         </DialogTitle>
                         <DialogDescription className="text-center">
-                            امسح رمز QR من تطبيق واتساب على هاتفك للربط
+                            اختر طريقة الربط
                         </DialogDescription>
                     </DialogHeader>
-                    <div className="flex flex-col items-center gap-4 py-4">
-                        {loadingQr ? (
-                            <div className="w-64 h-64 flex items-center justify-center">
-                                <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-                            </div>
-                        ) : qrUrl ? (
-                            <img
-                                src={qrUrl}
-                                alt="QR Code"
-                                className="w-64 h-64 rounded-lg border border-border bg-white p-2"
-                            />
-                        ) : (
-                            <div className="w-64 h-64 flex items-center justify-center text-muted-foreground">
-                                فشل تحميل رمز QR
-                            </div>
-                        )}
-                        <Button
-                            variant="outline"
-                            onClick={refreshQr}
-                            disabled={loadingQr}
-                            className="gap-2"
+
+                    {/* Tab Switcher */}
+                    <div className="flex gap-2 bg-secondary/50 rounded-lg p-1 border border-border">
+                        <button
+                            onClick={() => setAuthTab('qr')}
+                            className={`flex-1 py-2 px-3 rounded-md text-sm font-medium flex items-center justify-center gap-2 transition-all ${authTab === 'qr'
+                                ? 'bg-card text-white shadow-sm'
+                                : 'text-muted-foreground hover:text-white'
+                                }`}
                         >
-                            <RefreshCw className={`w-4 h-4 ${loadingQr ? 'animate-spin' : ''}`} />
-                            تحديث الرمز
-                        </Button>
+                            <QrCode className="w-4 h-4" />
+                            مسح QR
+                        </button>
+                        <button
+                            onClick={() => setAuthTab('code')}
+                            className={`flex-1 py-2 px-3 rounded-md text-sm font-medium flex items-center justify-center gap-2 transition-all ${authTab === 'code'
+                                ? 'bg-card text-white shadow-sm'
+                                : 'text-muted-foreground hover:text-white'
+                                }`}
+                        >
+                            <Smartphone className="w-4 h-4" />
+                            كود برقم الهاتف
+                        </button>
+                    </div>
+
+                    {/* QR Tab */}
+                    {authTab === 'qr' && (
+                        <div className="flex flex-col items-center gap-4 py-4">
+                            {loadingQr ? (
+                                <div className="w-64 h-64 flex items-center justify-center">
+                                    <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+                                </div>
+                            ) : qrUrl ? (
+                                <img
+                                    src={qrUrl}
+                                    alt="QR Code"
+                                    className="w-64 h-64 rounded-lg border border-border bg-white p-2"
+                                />
+                            ) : (
+                                <div className="w-64 h-64 flex items-center justify-center text-muted-foreground">
+                                    فشل تحميل رمز QR
+                                </div>
+                            )}
+                            <Button
+                                variant="outline"
+                                onClick={refreshQr}
+                                disabled={loadingQr}
+                                className="gap-2"
+                            >
+                                <RefreshCw className={`w-4 h-4 ${loadingQr ? 'animate-spin' : ''}`} />
+                                تحديث الرمز
+                            </Button>
+                        </div>
+                    )}
+
+                    {/* Code Tab */}
+                    {authTab === 'code' && (
+                        <div className="space-y-4 py-4">
+                            <div className="space-y-2">
+                                <Label className="text-white">رقم الهاتف</Label>
+                                <Input
+                                    value={codePhoneNumber}
+                                    onChange={(e) => setCodePhoneNumber(e.target.value)}
+                                    placeholder="مثال: 966501234567"
+                                    dir="ltr"
+                                    className="bg-secondary border-border text-white font-mono text-center text-lg"
+                                />
+                                <p className="text-xs text-muted-foreground text-center">أدخل الرقم بالكامل مع رمز الدولة بدون +</p>
+                            </div>
+                            <Button
+                                onClick={requestCode}
+                                disabled={requestingCode || !codePhoneNumber.trim()}
+                                className="w-full bg-white text-gray-900 hover:bg-gray-100 gap-2"
+                            >
+                                {requestingCode && <Loader2Icon className="w-4 h-4 animate-spin" />}
+                                طلب الكود
+                            </Button>
+                            {codeResult && (
+                                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-4 text-center">
+                                    <p className="text-lg font-mono font-bold text-emerald-400 tracking-[0.3em]">{codeResult}</p>
+                                    <p className="text-xs text-muted-foreground mt-2">أدخل هذا الكود في واتساب على هاتفك</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Polling indicator */}
+                    <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground border-t border-border pt-3">
+                        <Loader2Icon className="w-3 h-3 animate-spin" />
+                        بانتظار الربط...
                     </div>
                 </DialogContent>
             </Dialog>

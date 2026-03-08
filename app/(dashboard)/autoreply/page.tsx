@@ -413,8 +413,8 @@ export default function AutoReplyPage() {
                         <Button variant="outline" onClick={() => setDialogOpen(false)} className="border-border">
                             إلغاء
                         </Button>
-                        <Button onClick={handleSave} disabled={saving} className="bg-white text-gray-900 hover:bg-gray-100 gap-1">
-                            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                        <Button onClick={handleSave} disabled={saving} className="bg-white text-gray-900 hover:bg-gray-100 gap-1 w-100">
+                            {saving && <Loader2 className="w-4 h-4 animate-spin" />}
                             {editingRule ? 'حفظ التعديلات' : 'إنشاء القاعدة'}
                         </Button>
                     </DialogFooter>

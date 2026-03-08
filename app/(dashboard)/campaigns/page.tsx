@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import * as XLSX from 'xlsx';
 import api from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -36,11 +37,12 @@ import {
     ChevronLeft,
     ChevronRight,
     Calendar,
-    Eye,
     MessageSquareText,
     Layers,
     Smartphone,
     X,
+    BarChart3,
+    Ban,
 } from 'lucide-react';
 
 // ── Types ────────────────────────────────────────
@@ -97,10 +99,16 @@ function getStatusConfig(status: string) {
     switch (status) {
         case 'active':
             return { label: 'نشطة', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' };
+        case 'scheduled':
+            return { label: 'مجدولة', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' };
+        case 'pending':
+            return { label: 'قيد الانتظار', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' };
         case 'paused':
             return { label: 'متوقفة', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30' };
-        case 'completed':
+        case 'finished':
             return { label: 'مكتملة', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' };
+        case 'cancelled':
+            return { label: 'ملغية', color: 'bg-red-500/20 text-red-500 border-red-500/30' };
         case 'draft':
         default:
             return { label: 'مسودة', color: 'bg-secondary text-muted-foreground border-border' };
@@ -109,6 +117,7 @@ function getStatusConfig(status: string) {
 
 // ── Main Page ────────────────────────────────────
 export default function CampaignsPage() {
+    const router = useRouter();
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -144,16 +153,13 @@ export default function CampaignsPage() {
     const [variableMapping, setVariableMapping] = useState<Record<string, string>>({});
     const [detectedVars, setDetectedVars] = useState<string[]>([]);
 
-    // Detail view
-    const [viewCampaign, setViewCampaign] = useState<Campaign | null>(null);
-    const [recipients, setRecipients] = useState<CampaignRecipient[]>([]);
-    const [loadingRecipients, setLoadingRecipients] = useState(false);
-    const [detailTemplateBody, setDetailTemplateBody] = useState('');
-    const [showCount, setShowCount] = useState(10);
-
     // Delete confirmation
     const [deleteDialog, setDeleteDialog] = useState<{ id: number; name: string } | null>(null);
     const [deleting, setDeleting] = useState(false);
+
+    // Cancel confirmation
+    const [cancelDialog, setCancelDialog] = useState<{ id: number; name: string } | null>(null);
+    const [canceling, setCanceling] = useState(false);
 
     // ── Fetch Data ───────────────────────────────
     const fetchCampaigns = useCallback(async () => {
@@ -331,7 +337,7 @@ export default function CampaignsPage() {
                 phone_group_ids: selectedPhoneGroupIds.length > 0 ? selectedPhoneGroupIds : null,
                 phone_column: phoneColumn,
                 variable_mapping: variableMapping,
-                scheduled_at: scheduledAt,
+                scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
                 sheet_name: selectedSheet,
             };
 
@@ -353,44 +359,6 @@ export default function CampaignsPage() {
         }
     };
 
-    // ── Render message for a recipient ───────────
-    const renderMessage = (recipient: CampaignRecipient, templateBody: string, mapping: Record<string, string>): string => {
-        let msg = templateBody;
-        for (const [varName, colName] of Object.entries(mapping)) {
-            msg = msg.replaceAll(`{{${varName}}}`, recipient.row_data[colName] || '');
-        }
-        return msg;
-    };
-
-    // ── View Campaign ────────────────────────────
-    const openCampaignDetail = async (campaign: Campaign) => {
-        setViewCampaign(campaign);
-        setLoadingRecipients(true);
-        setShowCount(10);
-        setDetailTemplateBody('');
-        try {
-            // Fetch recipients + template body in parallel
-            const recipientPromise = api.get(`/api/campaigns/${campaign.id}/recipients`);
-            let bodyPromise: Promise<string>;
-
-            if (campaign.use_group && campaign.template_group_id) {
-                // For groups, fetch the group and use the first template's body as preview
-                bodyPromise = api.get(`/api/templates/groups/${campaign.template_group_id}`)
-                    .then(r => r.data.templates?.[0]?.body || '');
-            } else if (!campaign.use_group && campaign.template_id) {
-                bodyPromise = api.get(`/api/templates/${campaign.template_id}`)
-                    .then(r => r.data.body || '');
-            } else {
-                bodyPromise = Promise.resolve('');
-            }
-
-            const [recRes, body] = await Promise.all([recipientPromise, bodyPromise]);
-            setRecipients(recRes.data);
-            setDetailTemplateBody(body);
-        } catch (err) { console.error('Failed to fetch recipients/template:', err); }
-        finally { setLoadingRecipients(false); }
-    };
-
     // ── Delete Campaign ──────────────────────────
     const deleteCampaign = async (id: number) => {
         setDeleting(true);
@@ -400,6 +368,17 @@ export default function CampaignsPage() {
             setDeleteDialog(null);
         } catch (err) { console.error('Failed to delete campaign:', err); }
         finally { setDeleting(false); }
+    };
+
+    // ── Cancel Campaign ──────────────────────────
+    const cancelCampaign = async (id: number) => {
+        setCanceling(true);
+        try {
+            await api.post(`/api/campaigns/${id}/cancel`);
+            await fetchCampaigns();
+            setCancelDialog(null);
+        } catch (err) { console.error('Failed to cancel campaign:', err); }
+        finally { setCanceling(false); }
     };
 
     // ── Step validation ──────────────────────────
@@ -494,12 +473,19 @@ export default function CampaignsPage() {
                                             </div>
                                         </div>
                                         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-white" onClick={() => openCampaignDetail(c)}>
-                                                <Eye className="w-3.5 h-3.5" />
+                                            {c.status === 'scheduled' && (
+                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-orange-400" onClick={() => setCancelDialog({ id: c.id, name: c.name })} title="إلغاء الحملة">
+                                                    <Ban className="w-3.5 h-3.5" />
+                                                </Button>
+                                            )}
+                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-emerald-400" onClick={() => router.push(`/campaigns/${c.id}`)} title="تقرير الحملة">
+                                                <BarChart3 className="w-3.5 h-3.5" />
                                             </Button>
-                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-400" onClick={() => setDeleteDialog({ id: c.id, name: c.name })}>
-                                                <Trash2 className="w-3.5 h-3.5" />
-                                            </Button>
+                                            {c.status !== 'scheduled' && (
+                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-400" onClick={() => setDeleteDialog({ id: c.id, name: c.name })}>
+                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                </Button>
+                                            )}
                                         </div>
                                     </div>
                                 </CardHeader>
@@ -533,7 +519,8 @@ export default function CampaignsPage() {
 
             {/* ═══ Create Campaign Dialog ═══ */}
             <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-                <DialogContent className="bg-card border-border sm:max-w-2xl max-h-[85vh] overflow-y-auto" dir="rtl">
+                <DialogContent
+                    className="bg-card border-border sm:max-w-2xl max-h-[85vh] overflow-y-auto"                >
                     <DialogHeader>
                         <DialogTitle className="text-white">حملة جديدة</DialogTitle>
                         <DialogDescription>
@@ -881,101 +868,6 @@ export default function CampaignsPage() {
                 </DialogContent>
             </Dialog>
 
-            {/* ═══ Campaign Detail Dialog ═══ */}
-            <Dialog open={!!viewCampaign} onOpenChange={() => setViewCampaign(null)}>
-                <DialogContent className="bg-card border-border sm:max-w-2xl max-h-[85vh] overflow-y-auto" dir="rtl">
-                    {viewCampaign && (
-                        <>
-                            <DialogHeader>
-                                <DialogTitle className="text-white flex items-center gap-2">
-                                    <Megaphone className="w-5 h-5" />
-                                    {viewCampaign.name}
-                                </DialogTitle>
-                                <DialogDescription>{viewCampaign.description || 'بدون وصف'}</DialogDescription>
-                            </DialogHeader>
-                            <div className="space-y-4 py-2">
-                                {/* Stats */}
-                                <div className="grid grid-cols-3 gap-3">
-                                    <div className="p-3 rounded-lg bg-secondary/30 border border-border text-center">
-                                        <p className="text-xs text-muted-foreground">الحالة</p>
-                                        <Badge variant="outline" className={`text-xs mt-1 ${getStatusConfig(viewCampaign.status).color}`}>
-                                            {getStatusConfig(viewCampaign.status).label}
-                                        </Badge>
-                                    </div>
-                                    <div className="p-3 rounded-lg bg-secondary/30 border border-border text-center">
-                                        <p className="text-xs text-muted-foreground">المستلمين</p>
-                                        <p className="text-lg font-semibold text-white mt-1">{viewCampaign.recipient_count}</p>
-                                    </div>
-                                    <div className="p-3 rounded-lg bg-secondary/30 border border-border text-center">
-                                        <p className="text-xs text-muted-foreground">أرقام الإرسال</p>
-                                        <p className="text-lg font-semibold text-white mt-1">{viewCampaign.sender_phone_ids.length}</p>
-                                    </div>
-                                </div>
-
-                                {/* Recipients */}
-                                <div className="space-y-2">
-                                    <Label className="text-white">المستلمون</Label>
-                                    {loadingRecipients ? (
-                                        <div className="flex items-center justify-center py-8">
-                                            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                                        </div>
-                                    ) : recipients.length === 0 ? (
-                                        <p className="text-sm text-muted-foreground text-center py-4">لا يوجد مستلمون</p>
-                                    ) : (
-                                        <div className="space-y-3">
-                                            {recipients.slice(0, showCount).map((r, i) => {
-                                                const msg = detailTemplateBody && viewCampaign
-                                                    ? renderMessage(r, detailTemplateBody, viewCampaign.variable_mapping)
-                                                    : null;
-                                                return (
-                                                    <div key={r.id} className="group p-4 rounded-xl bg-card border border-border/40 hover:border-white/10 transition-colors">
-                                                        <div className="flex items-center justify-between mb-3">
-                                                            <div className="flex items-center gap-3">
-                                                                <span className="flex items-center justify-center w-6 h-6 rounded-full bg-secondary/50 text-[10px] text-muted-foreground font-mono">
-                                                                    {i + 1}
-                                                                </span>
-                                                                <span className="text-sm font-semibold text-white tracking-wide font-mono opacity-90" dir="ltr">
-                                                                    {r.phone_number}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-
-                                                        {msg ? (
-                                                            <div className="relative bg-secondary/30 rounded-2xl rounded-tr-sm p-3.5 border border-white/5">
-                                                                <p className="text-sm text-white/90 leading-relaxed whitespace-pre-wrap font-sans" dir="auto">
-                                                                    {msg}
-                                                                </p>
-                                                            </div>
-                                                        ) : (
-                                                            <div className="bg-red-500/5 border border-red-500/10 rounded-lg p-3">
-                                                                <p className="text-xs text-red-400/60 italic flex items-center gap-2">
-                                                                    <span className="w-1.5 h-1.5 rounded-full bg-red-500/40" />
-                                                                    لا يمكن معاينة الرسالة (القالب غير موجود)
-                                                                </p>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                );
-                                            })}
-                                            {recipients.length > showCount && (
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="w-full py-6 text-muted-foreground hover:text-white border border-dashed border-border hover:border-white/20 hover:bg-secondary/20"
-                                                    onClick={() => setShowCount(c => c + 10)}
-                                                >
-                                                    عرض {recipients.length - showCount} مستلم إضافي
-                                                </Button>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </>
-                    )}
-                </DialogContent>
-            </Dialog>
-
             {/* ═══ Delete Confirmation ═══ */}
             <Dialog open={!!deleteDialog} onOpenChange={() => setDeleteDialog(null)}>
                 <DialogContent className="bg-card border-border sm:max-w-md" dir="rtl">
@@ -998,6 +890,34 @@ export default function CampaignsPage() {
                         >
                             {deleting && <Loader2 className="w-4 h-4 animate-spin" />}
                             حذف
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ═══ Cancel Confirmation ═══ */}
+            <Dialog open={!!cancelDialog} onOpenChange={() => setCancelDialog(null)}>
+                <DialogContent className="bg-card border-border sm:max-w-md" dir="rtl">
+                    <DialogHeader>
+                        <DialogTitle className="text-white">تأكيد الإلغاء</DialogTitle>
+                        <DialogDescription>
+                            هل أنت متأكد من إلغاء الحملة{' '}
+                            <span className="text-white font-medium">&quot;{cancelDialog?.name}&quot;</span>؟
+                            <span className="block mt-1 text-xs text-orange-400">لن يتم إرسال أي رسائل أخرى من هذه الحملة.</span>
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="gap-2">
+                        <Button variant="outline" onClick={() => setCancelDialog(null)} className="border-border">
+                            تراجع
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            className="bg-orange-500 hover:bg-orange-600 text-white"
+                            onClick={() => cancelDialog && cancelCampaign(cancelDialog.id)}
+                            disabled={canceling}
+                        >
+                            {canceling && <Loader2 className="w-4 h-4 animate-spin" />}
+                            إلغاء الحملة
                         </Button>
                     </DialogFooter>
                 </DialogContent>

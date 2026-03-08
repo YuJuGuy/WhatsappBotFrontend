@@ -152,7 +152,7 @@ export default function MessagesPage() {
                                         </p>
                                     </TableCell>
                                     <TableCell className="text-xs text-zinc-500 whitespace-nowrap">
-                                        {format(new Date(message.timestamp), "dd MMM yyyy HH:mm", { locale: ar })}
+                                        {format(new Date(message.timestamp.endsWith('Z') ? message.timestamp : message.timestamp + 'Z'), "dd MMM yyyy HH:mm", { locale: ar })}
                                     </TableCell>
                                 </TableRow>
                             ))
@@ -193,7 +193,7 @@ export default function MessagesPage() {
                             {selectedMessage?.timestamp && (
                                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-zinc-500">
                                     <Calendar className="w-4 h-4" />
-                                    {format(new Date(selectedMessage.timestamp), "dd MMMM yyyy, HH:mm", { locale: ar })}
+                                    {format(new Date(selectedMessage.timestamp.endsWith('Z') ? selectedMessage.timestamp : selectedMessage.timestamp + 'Z'), "dd MMMM yyyy, HH:mm", { locale: ar })}
                                 </div>
                             )}
                         </div>
