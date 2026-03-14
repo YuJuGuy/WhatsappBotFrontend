@@ -16,8 +16,15 @@ import {
 } from '@/components/ui/select';
 import {
     MessageSquareReply, Plus, Loader2, Pencil, Trash2, Search,
-    ToggleLeft, ToggleRight, Zap, AlertCircle
+    ToggleLeft, ToggleRight, Zap, AlertCircle, Smartphone
 } from 'lucide-react';
+
+interface PhoneInfo {
+    id: number;
+    name: string;
+    number: string | null;
+    session_id: string;
+}
 
 interface AutoReplyRule {
     id: number;
@@ -29,6 +36,7 @@ interface AutoReplyRule {
     rule_priority: number;
     created_at: string;
     user_id: number;
+    phone_ids: number[];
 }
 
 const MATCH_TYPE_LABELS: Record<string, string> = {
@@ -45,10 +53,12 @@ const defaultRule: Omit<AutoReplyRule, 'id' | 'created_at' | 'user_id'> = {
     is_active: true,
     priority: 50,
     rule_priority: 0,
+    phone_ids: [],
 };
 
 export default function AutoReplyPage() {
     const [rules, setRules] = useState<AutoReplyRule[]>([]);
+    const [phones, setPhones] = useState<PhoneInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
@@ -67,7 +77,7 @@ export default function AutoReplyPage() {
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
     useEffect(() => {
-        fetchRules();
+        Promise.all([fetchRules(), fetchPhones()]).finally(() => setLoading(false));
     }, []);
 
     const fetchRules = async () => {
@@ -76,9 +86,27 @@ export default function AutoReplyPage() {
             setRules(data);
         } catch (error) {
             console.error('Failed to fetch rules:', error);
-        } finally {
-            setLoading(false);
         }
+    };
+
+    const fetchPhones = async () => {
+        try {
+            const { data } = await api.get('/api/phone/');
+            setPhones(data);
+        } catch (error) {
+            console.error('Failed to fetch phones:', error);
+        }
+    };
+
+    const getPhoneName = (id: number) => phones.find(p => p.id === id)?.name || `#${id}`;
+
+    const togglePhone = (phoneId: number) => {
+        setForm(prev => ({
+            ...prev,
+            phone_ids: prev.phone_ids.includes(phoneId)
+                ? prev.phone_ids.filter(id => id !== phoneId)
+                : [...prev.phone_ids, phoneId],
+        }));
     };
 
     const showMessage = (type: 'success' | 'error', text: string) => {
@@ -103,6 +131,7 @@ export default function AutoReplyPage() {
             is_active: rule.is_active,
             priority: rule.priority,
             rule_priority: rule.rule_priority,
+            phone_ids: rule.phone_ids || [],
         });
         setFormError('');
         setDialogOpen(true);
@@ -117,19 +146,21 @@ export default function AutoReplyPage() {
             setFormError('يجب إدخال نص الرد');
             return;
         }
+        if (form.phone_ids.length === 0) {
+            setFormError('يجب اختيار رقم واحد على الأقل');
+            return;
+        }
 
         setSaving(true);
         setFormError('');
         try {
             if (editingRule) {
-                const { data } = await api.put(`/api/autoreply/${editingRule.id}`, form);
-                setRules(prev => prev.map(r => r.id === editingRule.id ? data : r));
-                showMessage('success', 'تم تحديث القاعدة بنجاح');
+                await api.put(`/api/autoreply/${editingRule.id}`, form);
             } else {
-                const { data } = await api.post('/api/autoreply/', form);
-                setRules(prev => [...prev, data]);
-                showMessage('success', 'تم إنشاء القاعدة بنجاح');
+                await api.post('/api/autoreply/', form);
             }
+            await fetchRules();
+            showMessage('success', editingRule ? 'تم تحديث القاعدة بنجاح' : 'تم إنشاء القاعدة بنجاح');
             setDialogOpen(false);
         } catch (error) {
             setFormError('فشل حفظ القاعدة');
@@ -142,10 +173,10 @@ export default function AutoReplyPage() {
     // ── Toggle Active ──
     const handleToggleActive = async (rule: AutoReplyRule) => {
         try {
-            const { data } = await api.put(`/api/autoreply/${rule.id}`, {
+            await api.put(`/api/autoreply/${rule.id}`, {
                 is_active: !rule.is_active,
             });
-            setRules(prev => prev.map(r => r.id === rule.id ? data : r));
+            await fetchRules();
         } catch (error) {
             showMessage('error', 'فشل تغيير حالة القاعدة');
             console.error('Failed to toggle rule:', error);
@@ -271,6 +302,16 @@ export default function AutoReplyPage() {
                                                     </Badge>
                                                 )}
                                             </div>
+                                            {rule.phone_ids && rule.phone_ids.length > 0 && (
+                                                <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+                                                    <Smartphone className="w-3 h-3 text-zinc-500" />
+                                                    {rule.phone_ids.map(pid => (
+                                                        <Badge key={pid} variant="outline" className="text-[10px] bg-zinc-800/50 border-zinc-700 text-zinc-300">
+                                                            {getPhoneName(pid)}
+                                                        </Badge>
+                                                    ))}
+                                                </div>
+                                            )}
                                             <p className="text-sm text-muted-foreground line-clamp-2 whitespace-pre-wrap">
                                                 ← {rule.response_text}
                                             </p>
@@ -357,6 +398,50 @@ export default function AutoReplyPage() {
                                 onChange={e => setForm({ ...form, response_text: e.target.value })}
                                 className="bg-secondary border-border min-h-[100px] resize-none"
                             />
+                        </div>
+
+                        {/* Phone Selection */}
+                        <div className="space-y-2">
+                            <Label className="text-white flex items-center gap-2">
+                                <Smartphone className="w-4 h-4" />
+                                الأرقام المفعّلة
+                            </Label>
+                            <div className="flex flex-wrap gap-2 items-center">
+                                {phones.length > 1 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setForm(prev => ({
+                                            ...prev,
+                                            phone_ids: prev.phone_ids.length === phones.length
+                                                ? []
+                                                : phones.map(p => p.id),
+                                        }))}
+                                        className="px-3 py-1.5 rounded-lg border border-dashed border-zinc-600 text-xs text-primary hover:border-primary transition-colors"
+                                    >
+                                        {form.phone_ids.length === phones.length ? 'إلغاء الكل' : 'تحديد الكل'}
+                                    </button>
+                                )}
+                                {phones.map(phone => {
+                                    const selected = form.phone_ids.includes(phone.id);
+                                    return (
+                                        <button
+                                            key={phone.id}
+                                            type="button"
+                                            onClick={() => togglePhone(phone.id)}
+                                            className={`px-3 py-1.5 rounded-lg border text-xs transition-colors ${
+                                                selected
+                                                    ? 'bg-primary/20 border-primary text-primary'
+                                                    : 'bg-secondary border-border text-muted-foreground hover:border-zinc-500'
+                                            }`}
+                                        >
+                                            {phone.name}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            {phones.length === 0 && (
+                                <p className="text-xs text-muted-foreground">لا توجد أرقام مسجلة</p>
+                            )}
                         </div>
 
                         {/* Priority & Rule Priority */}

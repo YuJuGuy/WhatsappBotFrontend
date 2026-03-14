@@ -1,6 +1,15 @@
 import axios from 'axios';
 import { pushApiError } from '@/components/ApiErrorPopup';
 
+function getApiErrorMessage(error: any): string {
+    const detail = error?.response?.data?.detail;
+    if (Array.isArray(detail)) {
+        const msgs = detail.map((d: { msg?: string }) => d?.msg).filter(Boolean);
+        if (msgs.length > 0) return msgs.join('، ');
+    }
+    if (typeof detail === 'string' && detail.trim().length > 0) return detail;
+    return error?.message || 'حدث خطأ غير متوقع';
+}
 const api = axios.create({
     baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
     headers: {
@@ -43,7 +52,7 @@ api.interceptors.response.use(
 
         // Push error to global popup (skip 401s since they're handled above)
         if (status !== 401) {
-            const message = error.response?.data?.detail || error.message || 'حدث خطأ غير متوقع';
+            const message = getApiErrorMessage(error);
             pushApiError(message, status);
         }
 
@@ -52,3 +61,5 @@ api.interceptors.response.use(
 );
 
 export default api;
+
+

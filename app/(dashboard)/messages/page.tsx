@@ -10,8 +10,10 @@ import {
     Calendar,
     ArrowUpRight,
     ArrowDownLeft,
-    Inbox
+    Inbox,
+    Clock
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import {
     Dialog,
     DialogContent,
@@ -162,48 +164,64 @@ export default function MessagesPage() {
             </div>
 
             <Dialog open={!!selectedMessage} onOpenChange={(open) => !open && setSelectedMessage(null)}>
-                <DialogContent className="bg-zinc-950 border-zinc-800 text-white max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
-                    <DialogHeader className="border-b border-zinc-800 pb-4 space-y-4">
-                        <DialogTitle className="flex items-center gap-3">
-                            <div className={`p-2 rounded-full ${selectedMessage?.from_me ? 'bg-primary/20 text-primary' : 'bg-emerald-500/20 text-emerald-400'}`}>
-                                {selectedMessage?.from_me ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownLeft className="w-4 h-4" />}
+                <DialogContent className="">
+                    <DialogHeader className="border-b border-zinc-800 px-6 py-5 space-y-4">
+                        <div className="flex items-center justify-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900 text-primary">
+                                <MessageSquareText className="h-5 w-5" />
                             </div>
-                            <span className="text-lg">
-                                {selectedMessage?.from_me ? 'رسالة صادرة' : 'رسالة واردة'}
-                            </span>
-                        </DialogTitle>
-
-                        {/* 
-                            Moved out of DialogDescription to fix hydration error 
-                            (<p> cannot contain <div>)
-                        */}
-                        <div className="text-sm text-zinc-400 flex flex-wrap gap-4 pt-2">
-                            <div className="flex items-center gap-2 bg-zinc-900/50 px-3 py-1.5 rounded-lg border border-zinc-800/50">
-                                <span className="text-zinc-500">الهاتف:</span>
-                                <span className="font-medium text-zinc-200">
-                                    {selectedMessage?.phone_name}
-                                </span>
-                            </div>
-                            <div className="flex items-center gap-2 bg-zinc-900/50 px-3 py-1.5 rounded-lg border border-zinc-800/50">
-                                <span className="text-zinc-500">الرقم:</span>
-                                <span dir="ltr" className="font-medium text-zinc-200">
-                                    {selectedMessage?.from_number}
-                                </span>
-                            </div>
-                            {selectedMessage?.timestamp && (
-                                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-zinc-500">
-                                    <Calendar className="w-4 h-4" />
-                                    {format(new Date(selectedMessage.timestamp.endsWith('Z') ? selectedMessage.timestamp : selectedMessage.timestamp + 'Z'), "dd MMMM yyyy, HH:mm", { locale: ar })}
-                                </div>
+                            <DialogTitle className="text-2xl font-semibold text-white">تفاصيل الرسالة</DialogTitle>
+                        </div>
+                        <div className="flex justify-start">
+                            {selectedMessage && (
+                                <Badge variant="outline" className={`${selectedMessage.from_me ? 'bg-primary/20 text-primary border-primary/30' : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'} px-3 py-1 text-sm flex items-center gap-1`}>
+                                    {selectedMessage.from_me ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownLeft className="w-3.5 h-3.5" />}
+                                    {selectedMessage.from_me ? 'رسالة صادرة' : 'رسالة واردة'}
+                                </Badge>
                             )}
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                            <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3">
+                                <p className="mb-1 text-xs font-medium text-zinc-500">(من)</p>
+                                <p dir="ltr" className="text-base font-semibold text-zinc-100 break-all text-right">
+                                    {selectedMessage?.from_number || "-"}
+                                </p>
+                            </div>
+                            <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3">
+                                <p className="mb-1 text-xs font-medium text-zinc-500">(إلى)</p>
+                                <p dir="ltr" className="text-base font-semibold text-zinc-100 break-words text-right">
+                                    {selectedMessage?.to_number || "-"}
+                                </p>
+                            </div>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-3">
+                                <div className="flex items-center gap-2 text-xs font-medium text-zinc-500">
+                                    <Clock className="h-4 w-4" />
+                                    <span>وقت الإرسال</span>
+                                </div>
+                                <p dir="ltr" className="mt-1 text-sm text-zinc-200 text-right">
+                                    {selectedMessage?.timestamp ? format(new Date(selectedMessage.timestamp.endsWith('Z') ? selectedMessage.timestamp : selectedMessage.timestamp + 'Z'), "PP pp", { locale: ar }) : "-"}
+                                </p>
+                            </div>
+                            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-3">
+                                <div className="flex items-center gap-2 text-xs font-medium text-zinc-500">
+                                    <User className="h-4 w-4" />
+                                    <span>الهاتف المستخدم</span>
+                                </div>
+                                <p className="mt-1 text-sm text-zinc-200 font-medium">
+                                    {selectedMessage?.phone_name || "-"}
+                                </p>
+                            </div>
                         </div>
                     </DialogHeader>
 
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-[100px]">
-                        <div className={`p-4 rounded-xl whitespace-pre-wrap leading-relaxed ${selectedMessage?.from_me
-                            ? 'bg-primary/10 border border-primary/20 text-zinc-200 ml-12 rounded-tr-sm'
-                            : 'bg-zinc-900 border border-zinc-800 text-zinc-200 mr-12 rounded-tl-sm'
-                            }`}>
+                    <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4 min-h-[100px]">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-semibold text-zinc-200">نص الرسالة</h3>
+                            <span className="text-xs text-zinc-500">{selectedMessage?.message_body?.length || 0} chars</span>
+                        </div>
+                        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl whitespace-pre-wrap break-words leading-8 text-zinc-200">
                             {selectedMessage?.message_body}
                         </div>
                     </div>

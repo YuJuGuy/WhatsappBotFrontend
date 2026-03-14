@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import * as XLSX from 'xlsx';
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import api from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -150,6 +151,7 @@ export default function CampaignsPage() {
     const [selectedSheet, setSelectedSheet] = useState<string>('');
     const [xlsxColumns, setXlsxColumns] = useState<string[]>([]);
     const [phoneColumn, setPhoneColumn] = useState('');
+    const [invalidPhoneCount, setInvalidPhoneCount] = useState(0);
     const [variableMapping, setVariableMapping] = useState<Record<string, string>>({});
     const [detectedVars, setDetectedVars] = useState<string[]>([]);
 
@@ -227,6 +229,7 @@ export default function CampaignsPage() {
         setSelectedSheet('');
         setXlsxColumns([]);
         setPhoneColumn('');
+        setInvalidPhoneCount(0);
         setVariableMapping(prev => {
             const reset: Record<string, string> = {};
             Object.keys(prev).forEach(k => { reset[k] = ''; });
@@ -265,6 +268,50 @@ export default function CampaignsPage() {
             setXlsxColumns([]);
         }
     }, [xlsxWorkbook, selectedSheet]);
+
+    const isProbablyValidInternationalPhone = useCallback((value: unknown) => {
+        const raw = String(value ?? '').trim();
+        if (!raw) return false;
+
+        const normalized = raw.replace(/[^\d+]/g, '');
+        const candidate = normalized.startsWith('+') ? normalized : '+' + normalized;
+        const phone = parsePhoneNumberFromString(candidate);
+
+        return phone?.isValid() ?? false;
+    }, []);
+
+    useEffect(() => {
+        if (!xlsxWorkbook || !selectedSheet || !phoneColumn) {
+            setInvalidPhoneCount(0);
+            return;
+        }
+
+        const sheet = xlsxWorkbook.Sheets[selectedSheet];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as unknown[][];
+        if (rows.length === 0) {
+            setInvalidPhoneCount(0);
+            return;
+        }
+
+        const headers = rows[0].map(cell => String(cell ?? '').trim());
+        const phoneIndex = headers.findIndex(header => header === phoneColumn);
+        if (phoneIndex === -1) {
+            setInvalidPhoneCount(0);
+            return;
+        }
+
+        let invalidCount = 0;
+        for (const row of rows.slice(1)) {
+            const value = row[phoneIndex];
+            const raw = String(value ?? '').trim();
+            if (!raw) continue;
+            if (!isProbablyValidInternationalPhone(raw)) {
+                invalidCount += 1;
+            }
+        }
+
+        setInvalidPhoneCount(invalidCount);
+    }, [xlsxWorkbook, selectedSheet, phoneColumn, isProbablyValidInternationalPhone]);
 
     // Auto-map variables
     useEffect(() => {
@@ -312,6 +359,7 @@ export default function CampaignsPage() {
         setSelectedSheet('');
         setXlsxColumns([]);
         setPhoneColumn('');
+        setInvalidPhoneCount(0);
         setVariableMapping({});
         setDetectedVars([]);
         setCreateStep(0);
@@ -472,7 +520,7 @@ export default function CampaignsPage() {
                                                 )}
                                             </div>
                                         </div>
-                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                        <div className="flex gap-1 shrink-0">
                                             {c.status === 'scheduled' && (
                                                 <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-orange-400" onClick={() => setCancelDialog({ id: c.id, name: c.name })} title="إلغاء الحملة">
                                                     <Ban className="w-3.5 h-3.5" />
@@ -540,7 +588,7 @@ export default function CampaignsPage() {
 
                     {/* Step 0: Basic Info */}
                     {createStep === 0 && (
-                        <div className="space-y-4">
+                        <div className="space-y-4 overflow-x-hidden">
                             <div className="space-y-2">
                                 <Label className="text-white">اسم الحملة</Label>
                                 <Input
@@ -574,7 +622,7 @@ export default function CampaignsPage() {
 
                     {/* Step 1: Template Selection */}
                     {createStep === 1 && (
-                        <div className="space-y-4">
+                        <div className="space-y-4 overflow-x-hidden">
                             <div className="flex items-center gap-4 p-3 rounded-lg bg-secondary/40 border border-border">
                                 <label className="flex items-center gap-2 cursor-pointer flex-1">
                                     <input
@@ -669,7 +717,7 @@ export default function CampaignsPage() {
 
                     {/* Step 2: Sender Phones */}
                     {createStep === 2 && (
-                        <div className="space-y-4">
+                        <div className="space-y-4 overflow-x-hidden">
                             {/* Individual phones */}
                             {phones.length > 0 && (
                                 <div className="space-y-2">
@@ -726,7 +774,7 @@ export default function CampaignsPage() {
 
                     {/* Step 3: File & Mapping */}
                     {createStep === 3 && (
-                        <div className="space-y-4">
+                        <div className="space-y-4 overflow-x-hidden">
                             {/* File Upload */}
                             <div className="space-y-2">
                                 <Label className="text-white">ملف المستلمين (XLSX)</Label>
@@ -754,6 +802,7 @@ export default function CampaignsPage() {
                                                 setSelectedSheet('');
                                                 setXlsxColumns([]);
                                                 setPhoneColumn('');
+                                                setInvalidPhoneCount(0);
                                             }}
                                         >
                                             <X className="w-4 h-4" />
@@ -793,6 +842,11 @@ export default function CampaignsPage() {
                                             ))}
                                         </SelectContent>
                                     </Select>
+                                    {phoneColumn && invalidPhoneCount > 0 && (
+                                        <p className="text-sm text-amber-400">
+                                            {invalidPhoneCount} رقم غير صالح, انشاء الحملة سيتم بدون هذه الارقام
+                                        </p>
+                                    )}
                                 </div>
                             )}
 
